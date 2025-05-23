@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Meeting Scheduler</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #f3f4f6, #dfe6e9);
+      margin: 0;
+      padding: 40px 20px;
+      color: #333;
+    }
+    .container {
+      max-width: 900px;
+      margin: auto;
+      background-color: #fff;
+      padding: 30px;
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+    }
+    h2 {
+      text-align: center;
+      color: #2d3436;
+    }
+    form {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    input, button, select {
+      padding: 12px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 1rem;
+    }
+    button {
+      background-color: #0984e3;
+      color: white;
+      font-weight: bold;
+      border: none;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background-color: #74b9ff;
+    }
+    pre {
+      background: #f1f2f6;
+      padding: 15px;
+      border-radius: 10px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+    .action-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🧠 Smart Meeting Scheduler</h2>
+    <form id="availabilityForm">
+      <input type="text" id="personName" placeholder="Name" required />
+      <input type="text" id="availableTimes" placeholder="Available Times (e.g. 10:00, 14:00)" required />
+      <input type="date" id="meetingDate" required />
+      <input type="number" id="meetingDuration" placeholder="Duration (minutes)" required />
+      <input type="text" id="meetingPlace" placeholder="Meeting Place (e.g., Room 101)" />
+      <input type="url" id="meetingLink" placeholder="Meeting Link (optional)" />
+      <button type="submit">➕ Add Availability</button>
+    </form>
+
+    <div class="action-buttons">
+      <button id="findBestTime">📅 Find Best Time</button>
+      <button id="downloadIcs">📥 Download .ics</button>
+    </div>
+
+    <pre id="resultsDisplay">👥 Waiting for participants...</pre>
+  </div>
+
+  <script>
+    const form = document.getElementById("availabilityForm");
+    const resultsDisplay = document.getElementById("resultsDisplay");
+    const findTimeBtn = document.getElementById("findBestTime");
+    const downloadBtn = document.getElementById("downloadIcs");
+
+    const allAvailability = {};
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const name = document.getElementById("personName").value.trim();
+      const times = document.getElementById("availableTimes").value.trim().split(",").map(t => t.trim());
+
+      if (name && times.length > 0) {
+        allAvailability[name] = times;
+        updateDisplay();
+        form.reset();
+      }
+    });
+
+    function updateDisplay() {
+      resultsDisplay.textContent = "Participants:\n";
+      for (const [name, times] of Object.entries(allAvailability)) {
+        resultsDisplay.textContent += `- ${name}: ${times.join(", ")}\n`;
+      }
+    }
+
+    findTimeBtn.addEventListener("click", () => {
+      const commonSlots = getCommonTimes(allAvailability);
+      if (commonSlots.length > 0) {
+        resultsDisplay.textContent += `\n✅ Best time(s): ${commonSlots.join(", ")}`;
+      } else {
+        resultsDisplay.textContent += `\n⚠️ No common time found. Suggestions:`;
+        showSuggestions(allAvailability);
+      }
+    });
+
+    downloadBtn.addEventListener("click", () => {
+      const commonSlots = getCommonTimes(allAvailability);
+      const meetingDate = document.getElementById("meetingDate").value;
+      const duration = parseInt(document.getElementById("meetingDuration").value) || 60;
+      const meetingLink = document.getElementById("meetingLink").value.trim();
+      const meetingPlace = document.getElementById("meetingPlace").value.trim() || "Online";
+
+      if (commonSlots.length > 0 && meetingDate) {
+        const [hour, minute] = commonSlots[0].split(":");
+        const start = new Date(`${meetingDate}T${hour.padStart(2, "0")}:${minute.padStart(2, "0")}:00`);
+        const end = new Date(start.getTime() + duration * 60000);
+
+        const formatICS = (date) => {
+          return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+        };
+
+        const icsContent = [
+          "BEGIN:VCALENDAR",
+          "VERSION:2.0",
+          "CALSCALE:GREGORIAN",
+          "METHOD:PUBLISH",
+          "BEGIN:VEVENT",
+          "SUMMARY:Team Meeting",
+          `DTSTART:${formatICS(start)}`,
+          `DTEND:${formatICS(end)}`,
+          `DTSTAMP:${formatICS(new Date())}`,
+          `LOCATION:${meetingPlace}`,
+          `DESCRIPTION:Organized via Smart Meeting Scheduler. ${meetingLink ? "Link: " + meetingLink + "\\n" : ""}Place: ${meetingPlace}`,
+          "END:VEVENT",
+          "END:VCALENDAR"
+        ].join("\r\n");
+
+        const blob = new Blob([icsContent], { type: "text/calendar" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "meeting.ics";
+        link.click();
+      } else {
+        alert("Please ensure a valid date and availability are entered.");
+      }
+    });
+
+    function getCommonTimes(data) {
+      const counter = {};
+      const totalPeople = Object.keys(data).length;
+
+      Object.values(data).forEach(times => {
+        times.forEach(time => {
+          counter[time] = (counter[time] || 0) + 1;
+        });
+      });
+
+      return Object.entries(counter)
+        .filter(([_, count]) => count === totalPeople)
+        .map(([time]) => time);
+    }
+
+    function showSuggestions(data) {
+      const counter = {};
+      const totalPeople = Object.keys(data).length;
+
+      Object.values(data).forEach(times => {
+        times.forEach(time => {
+          counter[time] = (counter[time] || 0) + 1;
+        });
+      });
+
+      const topChoices = Object.entries(counter)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([time, count]) => `${time} (${count}/${totalPeople})`);
+
+      resultsDisplay.textContent += `\n🔄 Suggestions:\n- ${topChoices.join("\n- ")}`;
+    }
+  </script>
+</body>
+</html>
